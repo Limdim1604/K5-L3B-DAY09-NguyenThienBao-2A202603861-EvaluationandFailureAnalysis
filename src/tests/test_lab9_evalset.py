@@ -47,6 +47,16 @@ def test_explicit_check_runs_after_build(tmp_path, evalset_cli):
     assert f"{expected_problems} problem(s)" in result.stdout
 
 
+def test_eval_set_hash_ignores_checkout_line_endings(tmp_path):
+    from lab9.evalset import sha12
+
+    lf = tmp_path / "lf.jsonl"
+    crlf = tmp_path / "crlf.jsonl"
+    lf.write_bytes(b'{"item_id": "E-001"}\n{"item_id": "E-002"}\n')
+    crlf.write_bytes(lf.read_bytes().replace(b"\n", b"\r\n"))
+    assert sha12(lf) == sha12(crlf)
+
+
 def test_check_rejects_missing_tags(tmp_path, evalset_cli):
     evalset_cli("--build")
     items_path = tmp_path / "data/eval/eval_set_v1.jsonl"
