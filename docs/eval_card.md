@@ -72,3 +72,18 @@ Chạy cùng shape `swarm` với hai cụm seed bằng `python -m lab9.mutation 
 Sàn chặn `pass_hat_5` là 0.80 theo rubric, thấp hơn điểm A/A quan sát được 0.0929. `E-flaky_regression-20261118-1eeb` có `pass_rate` 0.9143 và `pass_at_5` 1.0000. Chỉ 0.5714 claim có cả 5 lượt pass, nên gate chặn theo `pass_hat_5`. Lượt này cũng bị chặn vì CI của `pass_rate` nằm dưới 0 và slice `money_movement` dưới sàn. Baseline so với chính nó qua gate. Scorecard công khai chặn 3/3 biến thể lỗi và có 0 báo nhầm.
 
 A/A trên MockLLM cho độ lệch quan sát bằng 0. Với LLM thật, kết quả giữa các lượt có thể dao động vì lấy mẫu và thay đổi của dịch vụ, nên cần đo A/A lặp trên các bộ seed đại diện và đặt sàn dưới dải dao động của bản tốt. Năm lượt vẫn khó phát hiện ổn định lỗi hiếm kích hoạt ở 1/3 seed. Ví dụ với các lượt độc lập, xác suất cả 5 lượt đều không kích hoạt lỗi xấp xỉ 13%.
+
+### Kiểm tra tính toàn vẹn của gate
+
+Chạy `lab9.traps` từ report `E-slice_regression-20261118-1eeb`, so với baseline v2. Mỗi trap trả exit 1 với lý do `INTEGRITY` khi chạy riêng qua `lab9.gate`. Lệnh `lab9.traps` tổng thể trả exit 0.
+
+| Trap công khai | Điều kiện gate phát hiện |
+|---|---|
+| `evaluator_errors_as_nan` | Thiếu điểm theo trial ở `pass_rate` và `refund_amount_correct`. |
+| `dropped_failing_rows` | Chỉ còn 131 trong 140 trial theo manifest. |
+| `cherry_picked_seeds` | Tập cặp `(item_id, seed)` khác baseline. |
+| `loosened_spec` | Cùng phiên bản eval set nhưng hạ sàn, bỏ kiểm tra CI hoặc bỏ slice. Gate so hai file spec qua `--base-spec`. |
+
+Regression test còn kiểm trial trùng dù tổng số dòng giữ nguyên, evaluator failure trên report có điểm đạt và slice bị đổi nhãn. Lượt kiểm tra `quiet_override` có `db_fact_kept` 1.0 vì trace không có event override. Gate vẫn phát hiện sai kết quả ở `refund_amount_correct`, slice `denial` và slice `adversarial`.
+
+Tính đúng của các điểm tổng hợp hữu hạn vẫn phụ thuộc vào report sinh từ harness. Khi kiểm tra ratchet, dùng bản spec trên nhánh đích làm `--base-spec`.
