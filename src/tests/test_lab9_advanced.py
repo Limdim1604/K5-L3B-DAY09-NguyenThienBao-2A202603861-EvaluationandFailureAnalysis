@@ -25,10 +25,11 @@ def test_pass_hat_k(stats, n, c, k, want):
     assert math.isclose(stats.pass_hat_k(n, c, k), want, abs_tol=1e-9)
 
 
-def test_pass_k_rejects_bad_args(stats):
-    for args in [(5, 6, 1), (5, 2, 0), (3, 1, 4)]:
-        with pytest.raises(ValueError):
-            stats.pass_at_k(*args)
+@pytest.mark.parametrize("metric", ["pass_at_k", "pass_hat_k"])
+@pytest.mark.parametrize("args", [(5, 6, 1), (5, 2, 0), (3, 1, 4), (3, -1, 2), (0, 0, 1), (5, 2.0, 1), (5, True, 1)])
+def test_pass_k_rejects_bad_args(stats, metric, args):
+    with pytest.raises(ValueError):
+        getattr(stats, metric)(*args)
 
 
 def _report(rows, metrics, items=4, seeds=(1, 2)):
