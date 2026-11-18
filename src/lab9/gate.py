@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from statistics import fmean
 
 from lab8.console import utf8_stdio
 from lab9 import stats
@@ -37,6 +38,15 @@ def integrity_check(pr: dict, base: dict, spec: dict, base_spec: dict | None = N
     return []
 
 
+def _paired_ci(candidate: dict[str, float], baseline: dict[str, float], options: dict) -> tuple[float, float, float]:
+    keys = sorted(candidate.keys() & baseline.keys())
+    return stats.paired_bootstrap(
+        [candidate[key] for key in keys], [baseline[key] for key in keys],
+        n_resamples=options.get("n_resamples", 1000), rng=options.get("rng", 2027),
+        confidence=options.get("confidence", 0.95),
+    )
+
+
 def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]:
     """M5 (Advanced): an average can hide a regression on a small, important slice.
     For each entry of spec["slices"] ({"name", "metric", "min"?, "no_significant_drop"?, "blocking"}):
@@ -44,8 +54,37 @@ def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]
       - fail if below "min", or if no_significant_drop and the paired CI over the slice's items
         lies entirely below 0
     Return (blocked ids like "slice:money_movement/pass_rate", report lines)."""
-    # TODO M5
-    return [], []
+    blocked, lines = [], []
+    for entry in spec.get("slices", []):
+        name, metric = entry["name"], entry["metric"]
+        slice_id = f"slice:{name}/{metric}"
+        candidate = per_item(pr, metric, slice_name=name)
+        floor = entry.get("min")
+        value = fmean(candidate.values()) if candidate else None
+        score = "n/a" if value is None else f"{value:.4f}"
+        note = f"min {floor}" if floor is not None else ""
+        verdict = "ok"
+        if value is None:
+            verdict = "missing"
+        elif floor is not None and value < floor:
+            verdict = "fail"
+
+        if entry.get("no_significant_drop") and candidate:
+            baseline = per_item(base, metric, slice_name=name)
+            if candidate.keys() != baseline.keys():
+                verdict = "missing"
+                note = f"{note} unmatched slice item scores".strip()
+            else:
+                delta, low, high = _paired_ci(candidate, baseline, spec.get("bootstrap", {}))
+                note = f"{note} Δ {delta:+.3f} CI [{low:+.3f}, {high:+.3f}]".strip()
+                if high < 0:
+                    verdict = "fail"
+
+        if verdict != "ok" and entry.get("blocking"):
+            blocked.append(slice_id)
+        label = {"ok": "ok", "missing": "MISSING"}.get(verdict, "BLOCK" if entry.get("blocking") else "warn")
+        lines.append(f"  {slice_id:<34} {score:<8} {note:<42} {label}")
+    return blocked, lines
 
 
 def check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> tuple[list[str], list[str]]:
@@ -70,12 +109,7 @@ def check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> tu
                 verdict = "fail"
         if th.get("no_significant_drop") and val is not None:
             a, b = per_item(pr, mid), per_item(base, mid)
-            keys = sorted(set(a) & set(b))
-            d, lo, hi = stats.paired_bootstrap(
-                [a[k] for k in keys], [b[k] for k in keys],
-                n_resamples=bs.get("n_resamples", 1000), rng=bs.get("rng", 2027),
-                confidence=bs.get("confidence", 0.95),
-            )
+            d, lo, hi = _paired_ci(a, b, bs)
             note = f"Δ {d:+.3f} CI [{lo:+.3f}, {hi:+.3f}]"
             if hi < 0:
                 verdict = "fail"

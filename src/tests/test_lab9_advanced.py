@@ -74,3 +74,18 @@ def test_slice_check_blocks_a_slice_below_floor():
     spec = dict(SPEC, slices=[{"name": "denial", "metric": "pass_rate", "min": 0.9, "blocking": True}])
     blocked, _ = gate.slice_check(_report(rows, {"pass_rate": 0.75}), base, spec)
     assert blocked == ["slice:denial/pass_rate"]
+
+
+def test_slice_check_blocks_paired_drop_above_floor():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+    rows = copy.deepcopy(ROWS)
+    for row in rows:
+        if "denial" in row["slices"] and row["seed"] == 1:
+            row["pass_rate"] = False
+    spec = dict(SPEC, slices=[
+        {"name": "denial", "metric": "pass_rate", "min": 0.5, "no_significant_drop": True, "blocking": True},
+    ])
+    assert gate.slice_check(base, base, spec)[0] == []
+    assert gate.slice_check(_report(rows, {"pass_rate": 0.75}), base, spec)[0] == ["slice:denial/pass_rate"]
