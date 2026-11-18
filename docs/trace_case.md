@@ -20,7 +20,7 @@ Lệnh in ra ba phần: các event trong trace (`reply`, `decision`, `model_over
 | Vì sao là bước đầu tiên | #1 `handoff` chọn đúng claim, #2 `investigator` thấy đơn `O-202` và đọc đúng `delay_days: 2`. Sau bước ghi đè #3, quote #4 mới áp dụng `SHIP-LATE-03` và đề xuất 20.000đ. |
 | Failure mode | [FM-03 · ticket_trust](failure_taxonomy.md) |
 | Đối chứng | `fixed C-002@11` giữ 2 ngày từ DB, event #3 `quote` trả `amount_vnd: 0` và `reason: no_entitlement`. Ledger 0đ, trạng thái `denied`, grader Day 8 PASS. |
-| Regression test | M3 sẽ thêm `test_c002_keeps_database_delay` cho cùng claim và seed. Kiểm `DbFactKept` cùng trạng thái `denied` và ledger 0đ. Replay đã cho thấy biểu hiện lỗi và đối chứng tương ứng. |
+| Regression test | `test_c002_keeps_database_delay` trong `src/tests/test_lab9_graders.py` chạy cả hai shape trên cùng claim và seed. Assertion xác nhận `DbFactKept` báo lỗi trên `seeded_regression`. Trên `fixed`, grader cho qua, kết quả là `denied` và ledger ghi 0đ. |
 | Chưa chắc chắn | Hai replay dùng một seed. Chúng xác định bước sai trong trial này nhưng chưa đo tần suất lỗi trên các seed hay claim khác. |
 
 ## Quy tắc
