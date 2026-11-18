@@ -43,3 +43,47 @@ Chi phí tính bằng VND mô phỏng cho mỗi trial thành công. Gate lấy t
 - **Phạm vi pilot** · Claim hoàn phí do giao trễ hoặc bồi thường hư hỏng đã xác minh, xử lý trên ticket LogiX-VN cho một đơn thuộc principal của claim. Khoản hoàn theo policy đang hiệu lực và bị giới hạn bởi mức duyệt, số tiền đã trả và hạn mức còn lại trên đơn. [PRD v1.1](PRD_v1.1.md)
 - **Giới hạn** · MockLLM, 14 claim và judge replay chỉ kiểm chứng môi trường lab. Chưa có dữ liệu người dùng thật hay tập judge held-out. Trace `swarm` Day 8 thiếu event `reply`, vì vậy điểm FM-08 của baseline chỉ ghi nhận các chênh lệch quan sát được.
 - **Khi tăng phiên bản eval set** · Thêm claim từ trace thực tế, thay nhãn đã adjudicate hoặc thêm pack và slice thì tăng phiên bản, xuất lại SHA và sinh baseline mới trước khi so PR.
+
+## Eval set v2 · Slice và độ ổn định
+
+Eval set v2 có SHA `1eeb749cfa90`, gồm 14 claim v1 và 14 claim adversarial, mỗi claim chạy 5 seed. Baseline `E-swarm-20261118-1eeb` được sinh vào `src/reports/baseline_v2.json`.
+
+| Slice chặn | Sàn `pass_rate` | Bằng chứng |
+|---|---:|---|
+| `money_movement` | 0.90 | `slice_regression` đạt 0.9357 chung và CI Δ [−0.121, +0.029]. Trên 12 claim có hoàn tiền, điểm giảm từ 1.0000 xuống 0.8500, CI Δ [−0.300, +0.000]. Gate chặn do dưới sàn của slice. |
+| `adversarial` | 0.90 | Theo dõi hồi quy trong 14 claim adversarial. `slice_regression` đạt 0.9143 và CI Δ [−0.186, +0.057], nên qua riêng slice này. |
+| `denial` | 0.90 | Theo dõi các claim cần từ chối hoàn tiền. `slice_regression` đạt 1.0000 trên slice này. |
+
+Hai bản `fixed` và `honest_refactor` qua gate. Metric FM-08 vẫn chặn khi số tiền reply báo đã hoàn khác ledger.
+
+### A/A và sàn `pass_hat_5`
+
+Chạy cùng shape `swarm` với hai cụm seed bằng `python -m lab9.mutation --spec config/metric_spec_v2.yaml --aa 66,77,88,99,110`.
+
+| Metric | Seed 11, 22, 33, 44, 55 | Seed 66, 77, 88, 99, 110 | Δ |
+|---|---:|---:|---:|
+| `pass_rate` | 0.9786 | 0.9786 | 0.0000 |
+| `pass_at_1` / `pass_hat_1` | 0.9786 | 0.9786 | 0.0000 |
+| `pass_at_3` | 1.0000 | 1.0000 | 0.0000 |
+| `pass_hat_3` | 0.9357 | 0.9357 | 0.0000 |
+| `pass_at_5` | 1.0000 | 1.0000 | 0.0000 |
+| `pass_hat_5` | 0.8929 | 0.8929 | 0.0000 |
+
+Sàn chặn `pass_hat_5` là 0.80 theo rubric, thấp hơn điểm A/A quan sát được 0.0929. `E-flaky_regression-20261118-1eeb` có `pass_rate` 0.9143 và `pass_at_5` 1.0000. Chỉ 0.5714 claim có cả 5 lượt pass, nên gate chặn theo `pass_hat_5`. Lượt này cũng bị chặn vì CI của `pass_rate` nằm dưới 0 và slice `money_movement` dưới sàn. Baseline so với chính nó qua gate. Scorecard công khai chặn 3/3 biến thể lỗi và có 0 báo nhầm.
+
+A/A trên MockLLM cho độ lệch quan sát bằng 0. Với LLM thật, kết quả giữa các lượt có thể dao động vì lấy mẫu và thay đổi của dịch vụ, nên cần đo A/A lặp trên các bộ seed đại diện và đặt sàn dưới dải dao động của bản tốt. Năm lượt vẫn khó phát hiện ổn định lỗi hiếm kích hoạt ở 1/3 seed. Ví dụ với các lượt độc lập, xác suất cả 5 lượt đều không kích hoạt lỗi xấp xỉ 13%.
+
+### Kiểm tra tính toàn vẹn của gate
+
+Chạy `lab9.traps` từ report `E-slice_regression-20261118-1eeb`, so với baseline v2. Mỗi trap trả exit 1 với lý do `INTEGRITY` khi chạy riêng qua `lab9.gate`. Lệnh `lab9.traps` tổng thể trả exit 0.
+
+| Trap công khai | Điều kiện gate phát hiện |
+|---|---|
+| `evaluator_errors_as_nan` | Thiếu điểm theo trial ở `pass_rate` và `refund_amount_correct`. |
+| `dropped_failing_rows` | Chỉ còn 131 trong 140 trial theo manifest. |
+| `cherry_picked_seeds` | Tập cặp `(item_id, seed)` khác baseline. |
+| `loosened_spec` | Cùng phiên bản eval set nhưng hạ sàn, bỏ kiểm tra CI hoặc bỏ slice. Gate so hai file spec qua `--base-spec`. |
+
+Regression test còn kiểm trial trùng dù tổng số dòng giữ nguyên, evaluator failure trên report có điểm đạt và slice bị đổi nhãn. Lượt kiểm tra `quiet_override` có `db_fact_kept` 1.0 vì trace không có event override. Gate vẫn phát hiện sai kết quả ở `refund_amount_correct`, slice `denial` và slice `adversarial`.
+
+Tính đúng của các điểm tổng hợp hữu hạn vẫn phụ thuộc vào report sinh từ harness. Khi kiểm tra ratchet, dùng bản spec trên nhánh đích làm `--base-spec`.

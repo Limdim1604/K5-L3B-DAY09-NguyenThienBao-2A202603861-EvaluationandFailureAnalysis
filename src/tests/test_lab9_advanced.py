@@ -25,10 +25,11 @@ def test_pass_hat_k(stats, n, c, k, want):
     assert math.isclose(stats.pass_hat_k(n, c, k), want, abs_tol=1e-9)
 
 
-def test_pass_k_rejects_bad_args(stats):
-    for args in [(5, 6, 1), (5, 2, 0), (3, 1, 4)]:
-        with pytest.raises(ValueError):
-            stats.pass_at_k(*args)
+@pytest.mark.parametrize("metric", ["pass_at_k", "pass_hat_k"])
+@pytest.mark.parametrize("args", [(5, 6, 1), (5, 2, 0), (3, 1, 4), (3, -1, 2), (0, 0, 1), (5, 2.0, 1), (5, True, 1)])
+def test_pass_k_rejects_bad_args(stats, metric, args):
+    with pytest.raises(ValueError):
+        getattr(stats, metric)(*args)
 
 
 def _report(rows, metrics, items=4, seeds=(1, 2)):
@@ -63,6 +64,54 @@ def test_integrity_flags_loosened_spec():
     assert gate.integrity_check(base, base, SPEC, SPEC) == []
 
 
+def test_integrity_flags_equal_length_duplicate():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+    candidate = copy.deepcopy(base)
+    candidate["rows"][-1] = copy.deepcopy(candidate["rows"][0])
+    assert any("duplicate" in problem for problem in gate.integrity_check(candidate, base, SPEC))
+
+
+def test_integrity_flags_evaluator_failure_on_green_report():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+    candidate = copy.deepcopy(base)
+    candidate["evaluator_failures"] = ["E-000@1:TrialPass: grader crashed"]
+    assert any("evaluator_failures" in problem for problem in gate.integrity_check(candidate, base, SPEC))
+
+
+def test_integrity_flags_missing_grade_and_changed_slice():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+    candidate = copy.deepcopy(base)
+    candidate["rows"][0]["pass_rate"] = None
+    candidate["rows"][1]["slices"] = []
+    problems = gate.integrity_check(candidate, base, SPEC)
+    assert any("pass_rate" in problem for problem in problems)
+    assert any("slice" in problem for problem in problems)
+
+
+def test_ratchet_rejects_removed_slice_and_disabled_drop_check():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+    base_spec = dict(copy.deepcopy(SPEC), slices=[
+        {"name": "denial", "metric": "pass_rate", "min": 0.9, "blocking": True},
+    ])
+    base_spec["metrics"][0]["threshold"]["no_significant_drop"] = True
+    candidate = copy.deepcopy(base_spec)
+    candidate["slices"].clear()
+    candidate["metrics"][0]["threshold"].pop("no_significant_drop")
+    problems = gate.integrity_check(base, base, candidate, base_spec)
+    assert any("slice:denial/pass_rate" in problem for problem in problems)
+    assert any("no_significant_drop" in problem for problem in problems)
+    candidate["eval_set_version"] = "v3"
+    assert gate.integrity_check(base, base, candidate, base_spec) == []
+
+
 def test_slice_check_blocks_a_slice_below_floor():
     from lab9 import gate
 
@@ -74,3 +123,18 @@ def test_slice_check_blocks_a_slice_below_floor():
     spec = dict(SPEC, slices=[{"name": "denial", "metric": "pass_rate", "min": 0.9, "blocking": True}])
     blocked, _ = gate.slice_check(_report(rows, {"pass_rate": 0.75}), base, spec)
     assert blocked == ["slice:denial/pass_rate"]
+
+
+def test_slice_check_blocks_paired_drop_above_floor():
+    from lab9 import gate
+
+    base = _report(copy.deepcopy(ROWS), {"pass_rate": 1.0})
+    rows = copy.deepcopy(ROWS)
+    for row in rows:
+        if "denial" in row["slices"] and row["seed"] == 1:
+            row["pass_rate"] = False
+    spec = dict(SPEC, slices=[
+        {"name": "denial", "metric": "pass_rate", "min": 0.5, "no_significant_drop": True, "blocking": True},
+    ])
+    assert gate.slice_check(base, base, spec)[0] == []
+    assert gate.slice_check(_report(rows, {"pass_rate": 0.75}), base, spec)[0] == ["slice:denial/pass_rate"]
